@@ -2,12 +2,14 @@
 
 namespace Parable\Console;
 
+use Parable\Console\Parameter\Argument;
+use Parable\Console\Parameter\Option;
+
 class Parameter
 {
     const PARAMETER_REQUIRED    = 1;
     const PARAMETER_OPTIONAL    = 2;
 
-    const OPTION_FLAG = 10;
     const OPTION_VALUE_REQUIRED = 11;
     const OPTION_VALUE_OPTIONAL = 12;
 
@@ -24,12 +26,15 @@ class Parameter
     protected $options = [];
 
     /** @var array */
+    protected $flagOptions = [];
+
+    /** @var array */
     protected $arguments = [];
 
-    /** @var \Parable\Console\Parameter\Option[] */
+    /** @var Option[] */
     protected $commandOptions = [];
 
-    /** @var \Parable\Console\Parameter\Argument[] */
+    /** @var Argument[] */
     protected $commandArguments = [];
 
     /** @var bool */
@@ -67,20 +72,15 @@ class Parameter
     /**
      * Split the parameters into script name, command name, options and arguments.
      *
-     * Flags (options without values) can be passed in a single set preceded by a dash:
+     * Flag options can be passed in a single set preceded by a dash:
      *   -a -b -c
-     * is the same as:
+     * or concatenated together, which looks like this:
      *   -abc
      *
-     * When an option is encountered that can have a value (even an optional value),
-     * the rest of the parameter is used as the option value (no more flags can follow):
+     * When an option is encountered with a value set, everything after = is seen as that value:
      *   -a -b -c=def
-     * is the same as:
-     *   -abcdef
-     *
-     * Double dash ("--") means the end op options, so in:
-     *   --option1 value1 --option2 -- argument1 --something=else
-     * the "--something=else" is interpreted as an argument, not an option named "something"
+     * or:
+     *   -abc=def
      *
      * @return $this
      */
@@ -91,81 +91,83 @@ class Parameter
         // Extract the scriptName
         $this->scriptName = array_shift($this->parameters);
 
-        $previousOptionValueName = '';
-        $endOfOptions = false;
-
         foreach ($this->parameters as $parameter) {
-            // No more options after the '--' parameter
-            if ($parameter === '--') {
-                $endOfOptions = true;
-                $previousOptionValueName = '';
-                continue;
-            }
+            $optionString = ltrim($parameter, '-');
 
-            // Long options: --abc, --abc def, or --abc=def
-            if (!$endOfOptions && substr($parameter, 0, 2) === "--") {
-                $parameter = ltrim($parameter, '-');
-                $previousOptionValueName = '';
-
-                $optionParts = explode('=', $parameter);
-                if (count($optionParts) > 1) {
-                    list($key, $value) = $optionParts;
-                    $this->options[$key] = $value;
-                } else {
-                    // no value given, set option to true
-                    $this->options[$parameter] = true;
-                    if (array_key_exists($parameter, $this->commandOptions)) {
-                        if (!$this->commandOptions[$parameter]->isFlag()) {
-                            // next parameter might be value
-                            $previousOptionValueName = $parameter;
-                        }
-                    }
-                }
-                continue;
-            }
-
-            // Short options: -p -q -r or -pqr for combined flags
-            if (!$endOfOptions && substr($parameter, 0, 1) === "-") {
-                $previousOptionValueName = '';
-
-                $optionString = ltrim($parameter, '-');
-                for ($i = 0; $i < strlen($optionString); $i++) {
-                    // All characters following a single '-' are flags, until the first option-argument
-                    $optionChar = substr($optionString, $i, 1);
-                    if (!array_key_exists($optionChar, $this->commandOptions)) {
-                        // Option was not pre-defined, so accept as undefined flag option
-                        $this->options[$optionChar] = true;
-                    } else {
-                        if ($this->commandOptions[$optionChar]->isFlag()) {
-                            // Flag options are set to true
-                            $this->options[$optionChar] = true;
-                        } else {
-                            // Value options take the rest of the options string, except for the optional '='
-                            $optionParts = explode('=', substr($optionString, $i + 1));
-                            if (count($optionParts) > 1) {
-                                $this->options[$optionChar] = $optionParts[1];
-                            } else {
-                                $this->options[$optionChar] = substr($optionString, $i + 1);
-                            }
-                            break;
-                        }
-                    }
-                }
-                continue;
-            }
-
-            // For arguments, we need to see if the first one is the command name or not.
-            if ($this->commandNameEnabled && !$this->commandName) {
-                $this->commandName = $parameter;
+            if (substr($parameter, 0, 2) === "--") {
+                $this->parseOption($optionString);
+            } elseif (substr($parameter, 0, 1) === "-") {
+                $this->parseFlagOption($optionString);
             } else {
-                if ($previousOptionValueName) {
-                    // If the previous parameter was a long option without a '=', this parameter is its value
-                    $this->options[$previousOptionValueName] = $parameter;
-                } else {
-                    $this->arguments[] = $parameter;
-                }
-                $previousOptionValueName = '';
+                $this->parseArgument($parameter);
             }
+        }
+        return $this;
+    }
+
+    /**
+     * Parse a long option (--option) string.
+     *
+     * @param string $optionString
+     *
+     * @return $this
+     */
+    protected function parseOption($optionString)
+    {
+        $optionParts = explode('=', $optionString);
+
+        if (count($optionParts) > 1) {
+            list($key, $value) = $optionParts;
+        } else {
+            $key   = $optionString;
+            $value = true;
+        }
+
+        $this->options[$key] = $value;
+        return $this;
+    }
+
+    /**
+     * Parse a flag option string (-a or -abc, this last version
+     * is parsed as a concatenated string of one char per option).
+     *
+     * @param string $optionString
+     *
+     * @return $this
+     */
+    protected function parseFlagOption($optionString)
+    {
+        for ($i = 0; $i < strlen($optionString); $i++) {
+            $optionChar = substr($optionString, $i, 1);
+            $optionParts = explode('=', substr($optionString, $i + 1));
+
+            if (count($optionParts) > 1 && empty($optionParts[0])) {
+                $value = $optionParts[1];
+            } elseif ($optionChar !== "=") {
+                $value = true;
+            } else {
+                break;
+            }
+
+            $this->flagOptions[$optionChar] = $value;
+        }
+        return $this;
+    }
+
+    /**
+     * Parse argument. If no command name set and commands are enabled,
+     * interpret as command name. Otherwise, add to argument list.
+     *
+     * @param string $parameter
+     *
+     * @return $this
+     */
+    protected function parseArgument($parameter)
+    {
+        if ($this->commandNameEnabled && !$this->commandName) {
+            $this->commandName = $parameter;
+        } else {
+            $this->arguments[] = $parameter;
         }
         return $this;
     }
@@ -193,16 +195,16 @@ class Parameter
     /**
      * Set the options from a command.
      *
-     * @param \Parable\Console\Parameter\Option[] $options
+     * @param Option[] $options
      *
      * @return $this
-     * @throws \Parable\Console\Exception
+     * @throws Exception
      */
     public function setCommandOptions(array $options)
     {
         foreach ($options as $name => $option) {
-            if ((!$option instanceof Parameter\Option)) {
-                throw new \Parable\Console\Exception(
+            if ((!$option instanceof Option)) {
+                throw new Exception(
                     "Options must be instances of Parameter\\Option. {$name} is not."
                 );
             }
@@ -215,17 +217,25 @@ class Parameter
      * Checks the options set against the parameters set. Takes into account whether an option is required
      * to be passed or not, or a value is required if it's passed, or sets the defaultValue if given and necessary.
      *
-     * @throws \Parable\Console\Exception
+     * @throws Exception
      */
     public function checkCommandOptions()
     {
         foreach ($this->commandOptions as $option) {
-            $option->addParameters($this->options);
+            if ($option->isFlagOption()) {
+                $parameters = $this->flagOptions;
+            } else {
+                $parameters = $this->options;
+            }
+            $option->addParameters($parameters);
 
             if ($option->isValueRequired() && $option->hasBeenProvided() && !$option->getValue()) {
-                throw new \Parable\Console\Exception(
-                    "Option '--{$option->getName()}' requires a value, which is not provided."
-                );
+                if ($option->isFlagOption()) {
+                    $message = "Option '-{$option->getName()}' requires a value, which is not provided.";
+                } else {
+                    $message = "Option '--{$option->getName()}' requires a value, which is not provided.";
+                }
+                throw new Exception($message);
             }
         }
     }
@@ -270,17 +280,17 @@ class Parameter
     /**
      * Set the arguments from a command.
      *
-     * @param \Parable\Console\Parameter\Argument[] $arguments
+     * @param Argument[] $arguments
      *
      * @return $this
-     * @throws \Parable\Console\Exception
+     * @throws Exception
      */
     public function setCommandArguments(array $arguments)
     {
         $orderedArguments = [];
         foreach ($arguments as $index => $argument) {
-            if (!($argument instanceof Parameter\Argument)) {
-                throw new \Parable\Console\Exception(
+            if (!($argument instanceof Argument)) {
+                throw new Exception(
                     "Arguments must be instances of Parameter\\Argument. The item at index {$index} is not."
                 );
             }
@@ -297,7 +307,7 @@ class Parameter
      * Checks the arguments set against the parameters set. Takes into account whether an argument is required
      * to be passed or not.
      *
-     * @throws \Parable\Console\Exception
+     * @throws Exception
      */
     public function checkCommandArguments()
     {
@@ -305,7 +315,7 @@ class Parameter
             $argument->addParameters($this->arguments);
 
             if ($argument->isRequired() && !$argument->hasBeenProvided()) {
-                throw new \Parable\Console\Exception(
+                throw new Exception(
                     "Required argument with index #{$index} '{$argument->getName()}' not provided."
                 );
             }

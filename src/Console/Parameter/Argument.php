@@ -2,6 +2,9 @@
 
 namespace Parable\Console\Parameter;
 
+use Parable\Console\Exception;
+use Parable\Console\Parameter;
+
 class Argument extends Base
 {
     /** @var int|null */
@@ -10,9 +13,14 @@ class Argument extends Base
     /** @var int|null */
     protected $order;
 
+    /**
+     * @param string     $name
+     * @param int        $required
+     * @param mixed|null $defaultValue
+     */
     public function __construct(
         $name,
-        $required = \Parable\Console\Parameter::PARAMETER_OPTIONAL,
+        $required = Parameter::PARAMETER_OPTIONAL,
         $defaultValue = null
     ) {
         $this->setName($name);
@@ -26,18 +34,18 @@ class Argument extends Base
      * @param int $required
      *
      * @return $this
-     * @throws \Parable\Console\Exception
+     * @throws Exception
      */
     public function setRequired($required)
     {
         if (!in_array(
             $required,
             [
-                \Parable\Console\Parameter::PARAMETER_REQUIRED,
-                \Parable\Console\Parameter::PARAMETER_OPTIONAL,
+                Parameter::PARAMETER_REQUIRED,
+                Parameter::PARAMETER_OPTIONAL,
             ]
         )) {
-            throw new \Parable\Console\Exception('Required must be one of the PARAMETER_* constants.');
+            throw new Exception('Required must be one of the PARAMETER_* constants.');
         }
         $this->required = $required;
         return $this;
@@ -50,7 +58,7 @@ class Argument extends Base
      */
     public function isRequired()
     {
-        return $this->required === \Parable\Console\Parameter::PARAMETER_REQUIRED;
+        return $this->required === Parameter::PARAMETER_REQUIRED;
     }
 
     /**

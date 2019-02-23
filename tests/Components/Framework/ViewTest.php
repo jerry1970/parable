@@ -17,17 +17,29 @@ class ViewTest extends \Parable\Tests\Components\Framework\Base
     public function testGettingNonExistingMagicPropertyThrowsException()
     {
         $this->expectException(\Parable\Framework\Exception::class);
-        $this->expectExceptionMessage("Could not find property 'stuff'. Make sure it was registered with the View.");
+        $this->expectExceptionMessage(
+            "Could not find property 'stuff'. Make sure it was registered with the View."
+        );
 
         $this->assertNull($this->view->stuff);
     }
 
-    public function testLoadingNonExistingTemplatePathIsSilent()
+    public function testLoadingNonExistingTemplatePathThrowsException()
     {
-        $this->view->setTemplatePath("stuff");
-        $this->view->render();
+        // Due to the try/catch, if it succeeds, it will simply not test anything. Hence we use $asserted
+        $asserted = false;
 
-        $this->assertEmpty($this->getActualOutput());
+        try {
+            $this->view->setTemplatePath('stuff/noexist.phtml');
+            $this->view->render();
+        } catch (\Parable\Framework\Exception $exception) {
+            self::assertContains('Template file could not be loaded', $exception->getMessage());
+            self::assertContains('stuff/noexist.phtml', $exception->getMessage());
+
+            $asserted = true;
+        }
+
+        self::assertTrue($asserted, "The test case was not asserted, expected exception not thrown");
     }
 
     public function testAccessingExistingMagicPropertyWorks()
